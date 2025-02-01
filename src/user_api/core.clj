@@ -1,5 +1,9 @@
 (ns user-api.core
+  (:gen-class)
   (:require
+    [muuntaja.core :as m]
+    [reitit.ring :as ring]
+    [retit.ring.middleware.muuntaja :as muuntaja]
     [ring.adapter.jetty :as jetty]))
 
 
