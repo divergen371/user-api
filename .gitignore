@@ -1,0 +1,31 @@
+/target
+/classes
+/checkouts
+profiles.clj
+pom.xml
+pom.xml.asc
+*.jar
+*.class
+/.lein-*
+/.nrepl-port
+/.prepl-port
+.hgignore
+.hg/
+
+# IDE specific files
+.idea/
+*.iml
+.vscode/
+.calva/
+.clj-kondo/
+.lsp/
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Dependency directory
+.cpcache/
+
+# Log files
+*.log
