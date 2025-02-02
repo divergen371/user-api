@@ -1,9 +1,8 @@
 (ns user-api.core-test
   (:require
-    [clojure.test :refer :all]
-    [ring.mock.request :as mock]
-    [user-api.core :refer :all]))
-
+   [clojure.test :refer :all]
+   [ring.mock.request :as mock]
+   [user-api.core :refer :all]))
 
 ;; テストの前にユーザーデータをリセットする
 (defn reset-users-fixture
@@ -11,9 +10,7 @@
   (reset! users {})
   (f))
 
-
 (use-fixtures :each reset-users-fixture)
-
 
 (deftest test-string-handler
   (testing "GET /"
@@ -21,7 +18,6 @@
       (is (= 200 (:status response)))
       (is (= "text/html" (get-in response [:headers "Content-Type"])))
       (is (clojure.string/includes? (:body response) "Welcome to User Management API")))))
-
 
 (deftest test-create-user
   (testing "POST /users with valid data"
@@ -38,7 +34,6 @@
       (is (= 400 (:status response)))
       (is (= {:error "Invalid user data"} (:body response))))))
 
-
 (deftest test-get-users
   (testing "GET /users with no users"
     (let [response (get-users {})]
@@ -51,7 +46,6 @@
       (is (= 200 (:status response)))
       (is (= {"1" {:id "1" :name "Alice" :email "alice@example.com"}} (:body response))))))
 
-
 (deftest test-get-user
   (testing "GET /users/:id with existing user"
     (swap! users assoc "1" {:id "1" :name "Alice" :email "alice@example.com"})
@@ -63,7 +57,6 @@
     (let [response (get-user {:path-params {:id "2"}})]
       (is (= 404 (:status response)))
       (is (= {:error "User not found"} (:body response))))))
-
 
 (deftest test-update-user
   (testing "PUT /users/:id with existing user"
@@ -79,7 +72,6 @@
       (is (= 404 (:status response)))
       (is (= {:error "User not found"} (:body response))))))
 
-
 (deftest test-delete-user
   (testing "DELETE /users/:id with existing user"
     (swap! users assoc "1" {:id "1" :name "Alice" :email "alice@example.com"})
@@ -92,14 +84,12 @@
       (is (= 404 (:status response)))
       (is (= {:error "User not found"} (:body response))))))
 
-
 (deftest test-start-stop-server
   (testing "Start and stop server"
     (start)
     (is (not (nil? @server)))
     (stop)
     (is (nil? @server))))
-
 
 (deftest test-create-user-edge-cases
   (testing "POST /users with empty name"
@@ -123,7 +113,6 @@
       (is (= 400 (:status response)))
       (is (= {:error "Email already exists"} (:body response))))))
 
-
 (deftest test-update-user-edge-cases
   (testing "PUT /users/:id with non-existing user"
     (let [response (update-user {:path-params {:id "999"}
@@ -138,13 +127,11 @@
       (is (= 400 (:status response)))
       (is (= {:error "Invalid user data"} (:body response))))))
 
-
 (deftest test-delete-user-edge-cases
   (testing "DELETE /users/:id with non-existing user"
     (let [response (delete-user {:path-params {:id "999"}})]
       (is (= 404 (:status response)))
       (is (= {:error "User not found"} (:body response))))))
-
 
 (deftest test-server-edge-cases
   (testing "Start server on already used port"

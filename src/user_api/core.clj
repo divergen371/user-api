@@ -1,20 +1,18 @@
 (ns user-api.core
   (:gen-class)
   (:require
-    [clojure.string :as str]
-    [clojure.tools.logging :as log]
-    [muuntaja.core :as m]
-    [reitit.ring :as ring]
-    [reitit.ring.middleware.muuntaja :as muuntaja]
-    [ring.adapter.jetty :as jetty]
-    [ring.middleware.params :as params]))
-
+   [clojure.string :as str]
+   [clojure.tools.logging :as log]
+   [muuntaja.core :as m]
+   [reitit.ring :as ring]
+   [reitit.ring.middleware.muuntaja :as muuntaja]
+   [ring.adapter.jetty :as jetty]
+   [ring.middleware.params :as params]))
 
 ;; 設定の外部化
 (def config
   {:server {:port 3000}
    :api {:version "1.0"}})
-
 
 (defn string-handler
   [_]
@@ -35,7 +33,6 @@ DELETE /users/:id  - Delete user by ID
 Example:
 curl -X POST -H \"Content-Type: application/json\" -d '{\"name\":\"Alice\",\"email\":\"alice@example.com\"}' http://localhost:3000/users"})
 
-
 ;; バリデーション関数
 (defn validate-user
   [user]
@@ -45,16 +42,13 @@ curl -X POST -H \"Content-Type: application/json\" -d '{\"name\":\"Alice\",\"ema
        (not (str/blank? (:email user)))
        (re-matches #"[^@]+@[^@]+\.[^@]+" (:email user))))
 
-
 (defonce server (atom nil))
 
 (def users (atom {}))
 
-
 (defn email-exists?
   [email]
   (some #(= email (:email %)) (vals @users)))
-
 
 (defn create-user
   [{user :body-params}]
@@ -80,12 +74,10 @@ curl -X POST -H \"Content-Type: application/json\" -d '{\"name\":\"Alice\",\"ema
       {:status 500
        :body {:error "Internal server error"}})))
 
-
 (defn get-users
   [_]
   {:status 200
    :body @users})
-
 
 (defn get-user
   [{{:keys [id]} :path-params}]
@@ -94,7 +86,6 @@ curl -X POST -H \"Content-Type: application/json\" -d '{\"name\":\"Alice\",\"ema
      :body user}
     {:status 404
      :body {:error "User not found"}}))
-
 
 (defn update-user
   [{{:keys [id]} :path-params user-update :body-params}]
@@ -120,7 +111,6 @@ curl -X POST -H \"Content-Type: application/json\" -d '{\"name\":\"Alice\",\"ema
     {:status 404
      :body {:error "User not found"}}))
 
-
 (defn delete-user
   [{{:keys [id]} :path-params}]
   (if (get @users id)
@@ -130,21 +120,19 @@ curl -X POST -H \"Content-Type: application/json\" -d '{\"name\":\"Alice\",\"ema
     {:status 404
      :body {:error "User not found"}}))
 
-
 (def app
   (ring/ring-handler
-    (ring/router
-      [["/users" {:get get-users
-                  :post create-user}]
-       ["/users/:id" {:get get-user
-                      :put update-user
-                      :delete delete-user}]
-       ["/" {:get string-handler}]]
-      {:data {:muuntaja m/instance
-              :middleware [muuntaja/format-middleware
-                           params/wrap-params]}})
-    (ring/create-default-handler)))
-
+   (ring/router
+    [["/users" {:get get-users
+                :post create-user}]
+     ["/users/:id" {:get get-user
+                    :put update-user
+                    :delete delete-user}]
+     ["/" {:get string-handler}]]
+    {:data {:muuntaja m/instance
+            :middleware [muuntaja/format-middleware
+                         params/wrap-params]}})
+   (ring/create-default-handler)))
 
 (defn start
   []
@@ -156,7 +144,6 @@ curl -X POST -H \"Content-Type: application/json\" -d '{\"name\":\"Alice\",\"ema
         (catch Exception e
           (log/error "Failed to start server:" (.getMessage e)))))))
 
-
 (defn stop
   []
   (when @server
@@ -166,7 +153,6 @@ curl -X POST -H \"Content-Type: application/json\" -d '{\"name\":\"Alice\",\"ema
       (reset! server nil)
       (catch Exception e
         (log/error "Error stopping server:" (.getMessage e))))))
-
 
 (start)
 
