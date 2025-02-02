@@ -1,5 +1,6 @@
 (ns user-api.core-test
   (:require
+   [buddy.hashers :as hashers]
    [cheshire.core :as json]
    [clj-http.client :as client]
    [clojure.test :refer :all]
