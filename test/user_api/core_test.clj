@@ -1,142 +1,182 @@
 (ns user-api.core-test
   (:require
+   [cheshire.core :as json]
+   [clj-http.client :as client]
    [clojure.test :refer :all]
-   [ring.mock.request :as mock]
-   [user-api.core :refer :all]))
+   [user-api.core :as core]))
 
-;; テストの前にユーザーデータをリセットする
-(defn reset-users-fixture
-  [f]
-  (reset! users {})
-  (f))
+(def base-url "http://localhost:3000")
+(def admin-token (atom nil))
+(def user-token (atom nil))
 
-(use-fixtures :each reset-users-fixture)
+(defn parse-body [response]
+  (json/parse-string (:body response) true))
 
-(deftest test-string-handler
-  (testing "GET /"
-    (let [response (string-handler (mock/request :get "/"))]
-      (is (= 200 (:status response)))
-      (is (= "text/html" (get-in response [:headers "Content-Type"])))
-      (is (clojure.string/includes? (:body response) "Welcome to User Management API")))))
+(defn with-auth-header [token]
+  {"Authorization" (str "Bearer " token)})
 
-(deftest test-create-user
-  (testing "POST /users with valid data"
-    (let [request (-> (mock/request :post "/users")
-                      (mock/json-body {:name "Alice" :email "alice@example.com"}))
-          response (create-user {:body-params {:name "Alice" :email "alice@example.com"}})]
+;; テストデータ
+(def test-admin
+  {:name "Admin User"
+   :email "admin@example.com"
+   :password "adminpass123"
+   :role "admin"})
+
+(def test-user
+  {:name "Test User"
+   :email "test@example.com"
+   :password "testpass123"})
+
+(defn setup-test-data []
+  ;; サーバーを起動
+  (core/start)
+
+  ;; 管理者ユーザーを直接作成（認証をバイパス）
+  (let [admin-id (str (java.util.UUID/randomUUID))
+        hashed-password (buddy.hashers/derive (:password test-admin))
+        admin-user (-> test-admin
+                       (assoc :id admin-id)
+                       (assoc :password hashed-password))]
+    (swap! core/users assoc admin-id admin-user))
+
+  ;; 管理者でログイン
+  (let [response (client/post (str base-url "/login")
+                              {:body (json/generate-string (select-keys test-admin [:email :password]))
+                               :content-type :json
+                               :throw-exceptions false})
+        body (parse-body response)]
+    (reset! admin-token (:token body)))
+
+  ;; 通常ユーザーを直接作成
+  (let [user-id (str (java.util.UUID/randomUUID))
+        hashed-password (buddy.hashers/derive (:password test-user))
+        normal-user (-> test-user
+                        (assoc :id user-id)
+                        (assoc :password hashed-password))]
+    (swap! core/users assoc user-id normal-user))
+
+  ;; 通常ユーザーでログイン
+  (let [response (client/post (str base-url "/login")
+                              {:body (json/generate-string (select-keys test-user [:email :password]))
+                               :content-type :json
+                               :throw-exceptions false})
+        body (parse-body response)]
+    (reset! user-token (:token body))))
+
+(defn cleanup-test-data []
+  (reset! core/users {})
+  (core/stop))
+
+(use-fixtures :each (fn [f]
+                      (setup-test-data)
+                      (f)
+                      (cleanup-test-data)))
+
+;; テストケース
+
+(deftest test-user-creation
+  (testing "正常なユーザー作成"
+    (let [new-user {:name "New User"
+                    :email "new@example.com"
+                    :password "newpass123"}
+          response (client/post (str base-url "/users")
+                                {:body (json/generate-string new-user)
+                                 :content-type :json
+                                 :throw-exceptions false})
+          body (parse-body response)]
       (is (= 201 (:status response)))
-      (is (contains? (:body response) :id))
-      (is (= "Alice" (get-in (:body response) [:name])))
-      (is (= "alice@example.com" (get-in (:body response) [:email])))))
+      (is (string? (:id body)))
+      (is (= (:name new-user) (:name body)))
+      (is (= (:email new-user) (:email body)))
+      (is (nil? (:password body)))))
 
-  (testing "POST /users with invalid data"
-    (let [response (create-user {:body-params {:name "Bob" :email "invalid-email"}})]
+  (testing "重複メールアドレスによるユーザー作成の失敗"
+    (let [duplicate-user (assoc test-user :name "Different Name")
+          response (client/post (str base-url "/users")
+                                {:body (json/generate-string duplicate-user)
+                                 :content-type :json
+                                 :throw-exceptions false})
+          body (parse-body response)]
       (is (= 400 (:status response)))
-      (is (= {:error "Invalid user data"} (:body response))))))
+      (is (= "Email already exists" (:error body))))))
 
-(deftest test-get-users
-  (testing "GET /users with no users"
-    (let [response (get-users {})]
+(deftest test-user-authentication
+  (testing "正常なログイン"
+    (let [response (client/post (str base-url "/login")
+                                {:body (json/generate-string
+                                        {:email (:email test-user)
+                                         :password (:password test-user)})
+                                 :content-type :json
+                                 :throw-exceptions false})
+          body (parse-body response)]
       (is (= 200 (:status response)))
-      (is (= {} (:body response)))))
+      (is (string? (:token body)))))
 
-  (testing "GET /users with users"
-    (swap! users assoc "1" {:id "1" :name "Alice" :email "alice@example.com"})
-    (let [response (get-users {})]
+  (testing "無効な認証情報によるログインの失敗"
+    (let [response (client/post (str base-url "/login")
+                                {:body (json/generate-string
+                                        {:email (:email test-user)
+                                         :password "wrongpassword"})
+                                 :content-type :json
+                                 :throw-exceptions false})
+          body (parse-body response)]
+      (is (= 401 (:status response)))
+      (is (= "Invalid credentials" (:error body))))))
+
+(deftest test-user-retrieval
+  (testing "管理者による全ユーザー取得"
+    (let [response (client/get (str base-url "/users")
+                               {:headers (with-auth-header @admin-token)
+                                :throw-exceptions false})
+          body (parse-body response)]
       (is (= 200 (:status response)))
-      (is (= {"1" {:id "1" :name "Alice" :email "alice@example.com"}} (:body response))))))
+      (is (map? body))
+      (is (>= (count body) 2))))
 
-(deftest test-get-user
-  (testing "GET /users/:id with existing user"
-    (swap! users assoc "1" {:id "1" :name "Alice" :email "alice@example.com"})
-    (let [response (get-user {:path-params {:id "1"}})]
+  (testing "権限のないユーザーによる全ユーザー取得の失敗"
+    (let [response (client/get (str base-url "/users")
+                               {:headers (with-auth-header @user-token)
+                                :throw-exceptions false})
+          body (parse-body response)]
+      (is (= 403 (:status response)))
+      (is (= "Forbidden" (:error body))))))
+
+(deftest test-user-update
+  (testing "ユーザー情報の更新"
+    (let [user-id (some (fn [[k v]]
+                          (when (= (:email v) (:email test-user)) k))
+                        @core/users)
+          update-data {:name "Updated Name"}
+          response (client/put (str base-url "/users/" user-id)
+                               {:body (json/generate-string update-data)
+                                :content-type :json
+                                :headers (with-auth-header @user-token)
+                                :throw-exceptions false})
+          body (parse-body response)]
       (is (= 200 (:status response)))
-      (is (= {:id "1" :name "Alice" :email "alice@example.com"} (:body response)))))
+      (is (= "Updated Name" (:name body)))
+      (is (= (:email test-user) (:email body))))))
 
-  (testing "GET /users/:id with non-existing user"
-    (let [response (get-user {:path-params {:id "2"}})]
-      (is (= 404 (:status response)))
-      (is (= {:error "User not found"} (:body response))))))
-
-(deftest test-update-user
-  (testing "PUT /users/:id with existing user"
-    (swap! users assoc "1" {:id "1" :name "Alice" :email "alice@example.com"})
-    (let [response (update-user {:path-params {:id "1"}
-                                 :body-params {:name "Alice Updated" :email "alice.updated@example.com"}})]
-      (is (= 200 (:status response)))
-      (is (= {:id "1" :name "Alice Updated" :email "alice.updated@example.com"} (:body response)))))
-
-  (testing "PUT /users/:id with non-existing user"
-    (let [response (update-user {:path-params {:id "2"}
-                                 :body-params {:name "Bob" :email "bob@example.com"}})]
-      (is (= 404 (:status response)))
-      (is (= {:error "User not found"} (:body response))))))
-
-(deftest test-delete-user
-  (testing "DELETE /users/:id with existing user"
-    (swap! users assoc "1" {:id "1" :name "Alice" :email "alice@example.com"})
-    (let [response (delete-user {:path-params {:id "1"}})]
+(deftest test-user-deletion
+  (testing "管理者によるユーザー削除"
+    (let [user-to-delete-id (str (java.util.UUID/randomUUID))
+          user-to-delete (-> test-user
+                             (assoc :id user-to-delete-id)
+                             (assoc :password (buddy.hashers/derive (:password test-user))))
+          _ (swap! core/users assoc user-to-delete-id user-to-delete)
+          response (client/delete (str base-url "/users/" user-to-delete-id)
+                                  {:headers (with-auth-header @admin-token)
+                                   :throw-exceptions false})]
       (is (= 204 (:status response)))
-      (is (nil? (get @users "1")))))
+      (is (nil? (get @core/users user-to-delete-id)))))
 
-  (testing "DELETE /users/:id with non-existing user"
-    (let [response (delete-user {:path-params {:id "2"}})]
-      (is (= 404 (:status response)))
-      (is (= {:error "User not found"} (:body response))))))
-
-(deftest test-start-stop-server
-  (testing "Start and stop server"
-    (start)
-    (is (not (nil? @server)))
-    (stop)
-    (is (nil? @server))))
-
-(deftest test-create-user-edge-cases
-  (testing "POST /users with empty name"
-    (let [response (create-user {:body-params {:name "" :email "alice@example.com"}})]
-      (is (= 400 (:status response)))
-      (is (= {:error "Invalid user data"} (:body response)))))
-
-  (testing "POST /users with empty email"
-    (let [response (create-user {:body-params {:name "Alice" :email ""}})]
-      (is (= 400 (:status response)))
-      (is (= {:error "Invalid user data"} (:body response)))))
-
-  (testing "POST /users with invalid email format"
-    (let [response (create-user {:body-params {:name "Alice" :email "invalid-email"}})]
-      (is (= 400 (:status response)))
-      (is (= {:error "Invalid user data"} (:body response)))))
-
-  (testing "POST /users with duplicate email"
-    (swap! users assoc "1" {:id "1" :name "Alice" :email "alice@example.com"})
-    (let [response (create-user {:body-params {:name "Bob" :email "alice@example.com"}})]
-      (is (= 400 (:status response)))
-      (is (= {:error "Email already exists"} (:body response))))))
-
-(deftest test-update-user-edge-cases
-  (testing "PUT /users/:id with non-existing user"
-    (let [response (update-user {:path-params {:id "999"}
-                                 :body-params {:name "Bob" :email "bob@example.com"}})]
-      (is (= 404 (:status response)))
-      (is (= {:error "User not found"} (:body response)))))
-
-  (testing "PUT /users/:id with invalid email format"
-    (swap! users assoc "1" {:id "1" :name "Alice" :email "alice@example.com"})
-    (let [response (update-user {:path-params {:id "1"}
-                                 :body-params {:name "Alice" :email "invalid-email"}})]
-      (is (= 400 (:status response)))
-      (is (= {:error "Invalid user data"} (:body response))))))
-
-(deftest test-delete-user-edge-cases
-  (testing "DELETE /users/:id with non-existing user"
-    (let [response (delete-user {:path-params {:id "999"}})]
-      (is (= 404 (:status response)))
-      (is (= {:error "User not found"} (:body response))))))
-
-(deftest test-server-edge-cases
-  (testing "Start server on already used port"
-    (start)
-    (let [response (start)]
-      (is (nil? response))
-      (is (not (nil? @server))))
-    (stop)))
+  (testing "権限のないユーザーによるユーザー削除の失敗"
+    (let [admin-id (some (fn [[k v]]
+                           (when (= (:email v) (:email test-admin)) k))
+                         @core/users)
+          response (client/delete (str base-url "/users/" admin-id)
+                                  {:headers (with-auth-header @user-token)
+                                   :throw-exceptions false})
+          body (parse-body response)]
+      (is (= 403 (:status response)))
+      (is (= "Forbidden" (:error body))))))

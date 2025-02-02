@@ -34,3 +34,5 @@ sgconfig.yml
 /rules
 /rule-tests
 /utils
+**/.calva/repl.calva-repl
+deps_tree.txt
