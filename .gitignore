@@ -29,3 +29,8 @@ Thumbs.db
 
 # Log files
 *.log
+
+sgconfig.yml
+/rules
+/rule-tests
+/utils

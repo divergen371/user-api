@@ -7,5 +7,6 @@
                  [javax.servlet/servlet-api "2.5"]
                  [ring "1.9.4"]
                  [metosin/reitit "0.5.15"]
-                 [metosin/muuntaja "0.6.8"]]
+                 [metosin/muuntaja "0.6.8"]
+                 [org.clojure/tools.logging "1.2.4"]]
   :repl-options {:init-ns user-api.core})

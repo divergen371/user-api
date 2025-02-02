@@ -1,17 +1,33 @@
 (ns user-api.core
   (:gen-class)
   (:require
+    [clojure.tools.logging :as log]
     [muuntaja.core :as m]
     [reitit.ring :as ring]
     [reitit.ring.middleware.muuntaja :as muuntaja]
-    [ring.adapter.jetty :as jetty]))
+    [ring.adapter.jetty :as jetty]
+    [ring.middleware.params :as params]))
+
+
+;; 設定の外部化
+(def config
+  {:server {:port 3000}
+   :api {:version "1.0"}})
 
 
 (defn string-handler
   [_]
-  {:starus 200
+  {:status 200   ; スペルミス修正
    :headers {"Content-Type" "text/html"}
    :body "Hello!! I'm a Clojure API"})
+
+
+;; バリデーション関数
+(defn validate-user
+  [user]
+  (and (:name user)
+       (:email user)
+       (re-matches #"[^@]+@[^@]+\.[^@]+" (:email user))))
 
 
 (defonce server (atom nil))
@@ -21,11 +37,21 @@
 
 (defn create-user
   [{user :body-params}]
-  (let [id (str (java.util.UUID/randomUUID))
-        new-user (assoc user :id id)]  ; Fixed user creation
-    (swap! users assoc id new-user)    ; Correctly update the users atom
-    {:status 201
-     :body new-user}))                 ; Return the created user
+  (try
+    (if (validate-user user)
+      (let [id (str (java.util.UUID/randomUUID))
+            new-user (assoc user :id id)]
+        (swap! users assoc id new-user)
+        (log/info "Created user:" id)
+        {:status 201
+         :body new-user})
+      {:status 400
+       :body {:error "Invalid user data"}})
+    (catch Exception e
+      (log/error "Error creating user:" (.getMessage e))
+      {:status 500
+       :body {:error "Internal server error"}})))
+
 
 (defn get-users
   [_]
@@ -66,28 +92,38 @@
 (def app
   (ring/ring-handler
     (ring/router
-      ["/"
-       ["" string-handler]
-       ["users" {:get get-users
-                 :post create-user}]
-       ["users/:id" {:get get-user
-                     :put update-user
-                     :delete delete-user}]]
+      [["/users" {:get get-users
+                  :post create-user}]
+       ["/users/:id" {:get get-user
+                      :put update-user
+                      :delete delete-user}]
+       ["/" {:get string-handler}]]
       {:data {:muuntaja m/instance
-              :middleware [muuntaja/format-middleware]}})))
+              :middleware [muuntaja/format-middleware
+                           params/wrap-params]}})
+    (ring/create-default-handler)))
 
 
 (defn start
   []
-  (when-not @server  ; サーバーが起動していない場合のみ起動
-    (reset! server (jetty/run-jetty app {:port 3000 :join? false}))))
+  (when-not @server
+    (let [port (get-in config [:server :port])]
+      (log/info "Starting server on port" port)
+      (try
+        (reset! server (jetty/run-jetty app {:port port :join? false}))
+        (catch Exception e
+          (log/error "Failed to start server:" (.getMessage e)))))))
 
 
 (defn stop
   []
   (when @server
-    (.stop @server)
-    (reset! server nil)))
+    (try
+      (log/info "Stopping server")
+      (.stop @server)
+      (reset! server nil)
+      (catch Exception e
+        (log/error "Error stopping server:" (.getMessage e))))))
 
 
 (start)

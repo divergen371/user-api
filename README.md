@@ -1,10 +1,27 @@
-# user-api
+# User API
 
-A Clojure library designed to ... well, that part is up to you.
+Simple RESTful API built with Clojure and Ring/Reitit for user management.
 
-## Usage
+## Features
 
-FIXME
+- CRUD operations for user management
+- Email validation
+- Error handling
+- Logging
+- Default response handlers for 404 and 405 errors
+
+## Prerequisites
+
+- Clojure 1.11.1 or later
+- Leiningen 2.0.0 or later
+
+## Installation
+
+```bash
+git clone <your-repository-url>
+cd user-api
+lein deps
+```
 
 ## License
 
