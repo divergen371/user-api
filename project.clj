@@ -12,7 +12,8 @@
   :plugins [[lein-cloverage "1.2.4"]]
   :profiles {:dev {:dependencies [[ring/ring-mock "0.4.0"]
                                   [ring/ring-devel "1.9.4"]
-                                  [cloverage "1.2.2"]]}
+                                  [cloverage "1.2.2"]]
+                   :extra-paths ["test"]}
              :cljstyle {:dependencies [[mvxcvi/cljstyle "0.17.642" :exclusions [org.clojure/clojure]]]}}
   :aliases {"cljstyle" ["with-profile" "+cljstyle" "run" "-m" "cljstyle.main"]}
   :repl-options {:init-ns user-api.core})
