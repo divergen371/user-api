@@ -36,3 +36,4 @@ sgconfig.yml
 /utils
 **/.calva/repl.calva-repl
 deps_tree.txt
+.env

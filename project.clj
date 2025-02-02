@@ -16,15 +16,19 @@
                  [cheshire "5.12.0"]  ; Updated version
                  [clj-http "3.12.3"]
                  [com.fasterxml.jackson.core/jackson-core "2.15.3"]
-                 [com.fasterxml.jackson.core/jackson-databind "2.15.3"]]
+                 [com.fasterxml.jackson.core/jackson-databind "2.15.3"]
+                 [environ "1.2.0"]]
 
-  :plugins [[lein-cloverage "1.2.4"]]
+  :plugins [[lein-cloverage "1.2.4"]
+            [lein-environ "1.2.0"]]
 
   :repositories [["central" "https://repo1.maven.org/maven2/"]
                  ["clojars" "https://repo.clojars.org/"]]
 
   :profiles {:dev {:dependencies [[ring/ring-mock "0.4.0"]]
-                   :extra-paths ["test"]}
+                   :env {:jwt-secret "dev-secret"}
+                   :test {:dependencies [[ring/ring-mock "0.4.0"]]}}
+             :extra-paths ["test"]
              :cljstyle {:dependencies [[mvxcvi/cljstyle "0.17.642" :exclusions [org.clojure/clojure]]]}}
 
   :aliases {"cljstyle" ["with-profile" "+cljstyle" "run" "-m" "cljstyle.main"]}

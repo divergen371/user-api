@@ -8,6 +8,7 @@
    [cheshire.core :as json]
    [clojure.string :as str]
    [clojure.tools.logging :as log]
+   [environ.core :refer [env]]
    [muuntaja.core :as m]
    [reitit.coercion.malli :as malli]
    [reitit.ring :as ring]
@@ -17,9 +18,10 @@
 
 ;; 設定
 (def config
-  {:server {:port 3000}
+  {:server {:port (Integer/parseInt (or (env :server-port) "3000"))}
    :api {:version "1.0"}
-   :jwt {:secret "your-256-bit-secret"}})
+   :jwt {:secret (or (env :jwt-secret)
+                     (throw (ex-info "JWT_SECRETが設定されていません。" {})))}})
 
 (defonce server (atom nil))
 (defonce users (atom {}))
