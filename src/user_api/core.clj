@@ -9,12 +9,18 @@
    [clojure.string :as str]
    [clojure.tools.logging :as log]
    [environ.core :refer [env]]
-   [muuntaja.core :as m]
-   [reitit.coercion.malli :as malli]
+   ;; muuntaja を mu にエイリアス
+   [malli.core :as m]
+   [muuntaja.core :as mu]
+   ;; malli を m にエイリアス
+   [reitit.coercion.malli]
    [reitit.ring :as ring]
    [reitit.ring.middleware.muuntaja :as muuntaja]
+   [reitit.swagger :as swagger]
+   [reitit.swagger-ui :as swagger-ui]
    [ring.adapter.jetty :as jetty]
-   [ring.middleware.params :as params]))
+   [ring.middleware.params :as params]
+   [user-api.schemas :as schemas]))
 
 ;; 設定
 (def config
@@ -34,31 +40,10 @@
 
 ;; バリデーション関数
 (defn validate-user-create [user]
-  (try
-    (and (string? (:name user))
-         (not (str/blank? (:name user)))
-         (string? (:email user))
-         (not (str/blank? (:email user)))
-         (re-matches #"[^@]+@[^@]+\.[^@]+" (:email user))
-         (string? (:password user))
-         (>= (count (:password user)) 8))
-    (catch Exception _
-      false)))
+  (m/validate schemas/user-create-schema user))
 
 (defn validate-user-update [user]
-  (try
-    (and (or (not (contains? user :name))
-             (and (string? (:name user))
-                  (not (str/blank? (:name user)))))
-         (or (not (contains? user :email))
-             (and (string? (:email user))
-                  (not (str/blank? (:email user)))
-                  (re-matches #"[^@]+@[^@]+\.[^@]+" (:email user))))
-         (or (not (contains? user :password))
-             (and (string? (:password user))
-                  (>= (count (:password user)) 8))))
-    (catch Exception _
-      false)))
+  (m/validate schemas/user-update-schema user))
 
 (defn email-exists? [email]
   (some #(= email (:email %)) (vals @users)))
@@ -109,7 +94,7 @@
            {:status 201
             :body (dissoc new-user :password)})))
      (catch Exception e
-       (log/error "Error creating user:" (.getMessage e))
+       (log/error e "Error creating user")
        {:status 500
         :body {:error "Internal server error"}}))))
 
@@ -129,24 +114,25 @@
       :body {:error "User not found"}})))
 
 ;; ユーザー更新ハンドラー
-(defn update-user [{{:keys [id]} :path-params user-update :body-params :keys [identity]}]
+(defn update-user [{{:keys [id]} :path-params
+                    :keys [body-params identity]}]
   (format-response
    (if-let [existing-user (get @users id)]
-     (let [updated-user (merge existing-user (select-keys user-update [:name :email :password]))]
+     (let [updated-user (merge existing-user (select-keys body-params [:name :email :password]))]
        (cond
-         (not (validate-user-update user-update))
+         (not (validate-user-update body-params))
          {:status 400
           :body {:error "Invalid user data"}}
 
-         (and (:email user-update)
-              (not= (:email existing-user) (:email user-update))
-              (email-exists? (:email user-update)))
+         (and (:email body-params)
+              (not= (:email existing-user) (:email body-params))
+              (email-exists? (:email body-params)))
          {:status 400
           :body {:error "Email already exists"}}
 
          :else
-         (let [final-user (if (:password user-update)
-                            (assoc updated-user :password (hashers/derive (:password user-update)))
+         (let [final-user (if (:password body-params)
+                            (assoc updated-user :password (hashers/derive (:password body-params)))
                             updated-user)]
            (swap! users assoc id final-user)
            {:status 200
@@ -200,22 +186,84 @@
 
 ;; アプリケーションルーティングとミドルウェア
 (def router-config
-  [["/login" {:post {:handler login-handler}}]
-   ["/users" {:get {:handler (wrap-admin-required get-users)}
-              :post {:handler create-user}}]
-   ["/users/:id" {:get {:handler get-user}
-                  :put {:handler update-user}
-                  :delete {:handler (wrap-admin-required delete-user)}}]
-   ["/" {:get {:handler string-handler}}]])
+  [["/swagger.json" {:get {:no-doc true
+                           :swagger {:info {:title "User Management API"
+                                            :description "API documentation for User Management"
+                                            :version "1.0"}}
+                           :handler swagger/create-swagger-handler}}]
+   ["/swagger-ui/*" {:get {:no-doc true
+                           :handler (swagger-ui/create-swagger-ui-handler {:url "/swagger.json"})}}]
+   ["/login" {:post {:handler login-handler
+                     :swagger {:tags ["Authentication"]
+                               :summary "ユーザーログイン"
+                               :parameters {:body schemas/login-schema}
+                               :responses {200 {:description "ログイン成功"
+                                                :schema schemas/login-response-schema}
+                                           401 {:description "認証失敗"}}}}}]
+   ["/users" {:get {:handler (wrap-admin-required get-users)
+                    :swagger {:tags ["Users"]
+                              :summary "ユーザー一覧取得"
+                              :responses {200 {:description "成功"
+                                               :schema {:type "object"
+                                                        :additionalProperties schemas/user-response-schema}}}
+                              :security [{:Bearer []}]}}
+              :post {:handler create-user
+                     :swagger {:tags ["Users"]
+                               :summary "新規ユーザー作成"
+                               :parameters {:body schemas/user-create-schema}
+                               :responses {201 {:description "ユーザー作成成功"
+                                                :schema schemas/user-response-schema}
+                                           400 {:description "入力データ不正"}
+                                           500 {:description "内部サーバーエラー"}}
+                               :security [{:Bearer []}]}}}]
+   ["/users/:id" {:get {:handler get-user
+                        :swagger {:tags ["Users"]
+                                  :summary "ユーザー詳細取得"
+                                  :parameters {:path {:id string?}}
+                                  :responses {200 {:description "成功"
+                                                   :schema schemas/user-response-schema}
+                                              404 {:description "ユーザーが見つからない"}}
+                                  :security [{:Bearer []}]}}
+                  :put {:handler update-user
+                        :swagger {:tags ["Users"]
+                                  :summary "ユーザー情報更新"
+                                  :parameters {:path {:id string?}
+                                               :body schemas/user-update-schema}
+                                  :responses {200 {:description "更新成功"
+                                                   :schema schemas/user-response-schema}
+                                              400 {:description "入力データ不正"}
+                                              404 {:description "ユーザーが見つからない"}}
+                                  :security [{:Bearer []}]}}
+                  :delete {:handler (wrap-admin-required delete-user)
+                           :swagger {:tags ["Users"]
+                                     :summary "ユーザー削除"
+                                     :parameters {:path {:id string?}}
+                                     :responses {204 {:description "削除成功"}
+                                                 404 {:description "ユーザーが見つからない"}}
+                                     :security [{:Bearer []}]}}}]
+   ["/" {:get {:handler string-handler
+               :swagger {:tags ["Home"]
+                         :summary "ウェルカムメッセージ"
+                         :responses {200 {:description "成功"
+                                          :schema [:map [:body string?]]}}}}}]])
 
 (def app-config
-  {:data {:muuntaja m/instance
-          :middleware [params/wrap-params
-                       muuntaja/format-middleware]}})
+  {:data {:muuntaja mu/instance
+          :middleware [muuntaja/format-middleware
+                       params/wrap-params
+                       swagger/swagger-feature]
+          :coercion reitit.coercion.malli/coercion
+          :swagger {:info {:title "User Management API"
+                           :description "API documentation for User Management"
+                           :version "1.0"}
+                    :securityDefinitions {:Bearer {:type "apiKey"
+                                                   :name "Authorization"
+                                                   :in "header"}}}}})
 
 (defonce app
   (-> (ring/ring-handler
-       (ring/router router-config app-config))
+       (ring/router router-config app-config)
+       (ring/create-default-handler))
       (wrap-authentication auth-backend)
       (wrap-authorization auth-backend)))
 
@@ -227,7 +275,7 @@
       (try
         (reset! server (jetty/run-jetty app {:port port :join? false}))
         (catch Exception e
-          (log/error "Failed to start server:" (.getMessage e)))))))
+          (log/error e "Failed to start server"))))))
 
 ;; サーバー停止
 (defn stop []
@@ -237,7 +285,7 @@
       (.stop @server)
       (reset! server nil)
       (catch Exception e
-        (log/error "Error stopping server:" (.getMessage e))))))
+        (log/error e "Error stopping server")))))
 
 ;; メインエントリーポイント
 (defn -main [& _args]
